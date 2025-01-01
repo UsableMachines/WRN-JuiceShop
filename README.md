@@ -35,7 +35,7 @@ Outputs:
 juice_shop_url = "http://juice-shop-alb-0000000000.us-east-1.elb.amazonaws.com"
 ```
 
-The Juiceshop will not be immediately available. Give it a few minutes for post processing and keep refreshing the URL.
+The Juiceshop will not be immediately available and may see a 503 error. Give it a few minutes for post processing and keep refreshing the URL.
 
 # (In)security Design
 
