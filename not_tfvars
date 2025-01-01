@@ -1,0 +1,5 @@
+#rename this file to terrafrom.tfvars
+#the default linux/mac path to local creds are /home/USER_NAME/.aws/credentials"
+
+aws_profile                   = "AWS profile name from setting up AWS Configure --profile"
+aws_shared_credentials_file   = "/PATH/TO/CREDS"
