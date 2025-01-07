@@ -19,6 +19,46 @@ terraform {
   }
 }
 
+data "aws_caller_identity" "current" {}
+
+resource "aws_s3_object" "fluent_bit_config" {
+  bucket  = aws_s3_bucket.donald_duck.id
+  key     = "parse-json.conf"
+  content = <<EOF
+[SERVICE]
+    Parsers_File /fluent-bit/parsers.conf
+    Log_Level    info
+
+[INPUT]
+    Name   forward
+    Listen 0.0.0.0
+    Port   24224
+
+[FILTER]
+    Name   parser
+    Match  *
+    Key_Name log
+    Parser  docker
+    Reserve_Data true
+
+[FILTER]
+    Name   modify
+    Match  *
+    Add    app_name juice-shop
+
+[OUTPUT]
+    Name               s3
+    Match              *
+    region             ${var.aws_region}
+    bucket             ${aws_s3_bucket.donald_duck.id}
+    total_file_size    1M
+    upload_timeout     1m
+    use_put_object     On
+    compression        gzip
+    s3_key_format      /juice-shop-logs/%Y/%m/%d/%H/%M/%S
+EOF
+}
+
 provider "aws" {
   region = var.aws_region
 }
@@ -341,10 +381,13 @@ resource "aws_ecs_task_definition" "juice_shop" {
     {
       name  = "log_router"
       image = "public.ecr.aws/aws-observability/aws-for-fluent-bit:latest"
+      essential = true
       firelensConfiguration = {
         type = "fluentbit"
         options = {
           "enable-ecs-log-metadata" = "true"
+          "config-file-type"        = "file"
+          "config-file-value"       = "/fluent-bit/etc/extra.conf"
         }
       }
       logConfiguration = {
@@ -356,6 +399,44 @@ resource "aws_ecs_task_definition" "juice_shop" {
         }
       }
       memoryReservation = 50
+      environment = [
+        {
+          name  = "FLB_CONFIG_EXTRA",
+          value = <<EOF
+[SERVICE]
+    Parsers_File /fluent-bit/parsers.conf
+    Log_Level    info
+
+[INPUT]
+    Name   forward
+    Listen 0.0.0.0
+    Port   24224
+
+[FILTER]
+    Name   parser
+    Match  *
+    Key_Name log
+    Parser  docker
+    Reserve_Data true
+
+[FILTER]
+    Name   modify
+    Match  *
+    Add    app_name juice-shop
+
+[OUTPUT]
+    Name               s3
+    Match              *
+    region             ${var.aws_region}
+    bucket             ${aws_s3_bucket.donald_duck.id}
+    total_file_size    1M
+    upload_timeout     1m
+    use_put_object     On
+    compression        gzip
+    s3_key_format      /juice-shop-logs/%Y/%m/%d/%H/%M/%S
+EOF
+        }
+      ]
     },
     {
       name  = "juice-shop"
@@ -370,25 +451,33 @@ resource "aws_ecs_task_definition" "juice_shop" {
       logConfiguration = {
         logDriver = "awsfirelens"
         options = {
-          "Name"       = "s3"
-          "region"     = var.aws_region
-          "bucket"     = aws_s3_bucket.donald_duck.id
-          "prefix"     = "juice-shop-logs/"
-          "compress"   = "gzip"
-          "total_file_size" = "1M"
-          "upload_timeout" = "1m"
+          "Name"              = "s3"
+          "region"           = var.aws_region
+          "bucket"           = aws_s3_bucket.donald_duck.id
+          "total_file_size"  = "1M"
+          "upload_timeout"   = "1m"
+          "use_put_object"   = "On"
+          "compression"      = "gzip"
+          "s3_key_format"    = "/juice-shop-logs/%Y/%m/%d/%H/%M/%S"
         }
+        secretOptions = []
       }
+      environment = [
+        {
+          name  = "NODE_ENV"
+          value = "production"
+        }
+      ]
       dependsOn = [
         {
           containerName = "log_router"
           condition     = "START"
         }
       ]
+      essential = true
     }
   ])
 }
-
 
 #output for juiceshop url
 output "juice_shop_url" {
