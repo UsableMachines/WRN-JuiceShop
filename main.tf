@@ -150,66 +150,6 @@ resource "aws_lb_listener" "main" {
   }
 }
 
-# ECS Resources
-resource "aws_ecs_cluster" "main" {
-  name = "juice-shop-cluster"
-  
-    setting {
-    name  = "containerInsights"
-    value = "enabled"
-  }
-}
-
-resource "aws_ecs_task_definition" "juice_shop" {
-  family                   = "juice-shop"
-  network_mode            = "awsvpc"
-  requires_compatibilities = ["FARGATE"]
-  cpu                     = 256
-  memory                  = 512
-
-  container_definitions = jsonencode([
-    {
-      name  = "juice-shop"
-      image = "bkimminich/juice-shop:latest"
-      portMappings = [
-        {
-          containerPort = 3000
-          hostPort      = 3000
-          protocol      = "tcp"
-        }
-      ]
-    }
-  ])
-}
-
-resource "aws_ecs_service" "juice_shop" {
-  name            = "juice-shop-service"
-  cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.juice_shop.arn
-  desired_count   = 1
-  launch_type     = "FARGATE"
-
-  network_configuration {
-    subnets          = aws_subnet.public[*].id
-    security_groups  = [aws_security_group.ecs.id]
-    assign_public_ip = true
-  }
-
-  load_balancer {
-    target_group_arn = aws_lb_target_group.juice_shop.arn
-    container_name   = "juice-shop"
-    container_port   = 3000
-  }
-}
-
-data "aws_availability_zones" "available" {
-  state = "available"
-}
-
-/*output "juice_shop_url" {
-  value = "http://${aws_lb.main.dns_name}"
-}*/
-
 #create publicly exposed s3 bucket
 
 resource "aws_s3_bucket" "donald_duck" {
@@ -265,6 +205,172 @@ resource "aws_s3_bucket_acl" "donald_duck" {
   acl    = "public-read"
 }
 
+# ECS Resources
+resource "aws_ecs_cluster" "main" {
+  name = "juice-shop-cluster"
+  
+    setting {
+    name  = "containerInsights"
+    value = "enabled"
+  }
+}
+
+resource "aws_cloudwatch_log_group" "firelens" {
+  name              = "/aws/ecs/juice-shop-firelens"
+  retention_in_days = 14
+}
+
+resource "aws_iam_role" "ecs_task_role" {
+  name = "juice-shop-ecs-task-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_ecs_service" "juice_shop" {
+  name            = "juice-shop-service"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.juice_shop.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets          = aws_subnet.public[*].id
+    security_groups  = [aws_security_group.ecs.id]
+    assign_public_ip = true
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.juice_shop.arn
+    container_name   = "juice-shop"
+    container_port   = 3000
+  }
+}
+
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+#Firelens to ship logs to donald-duck s3 bucket
+resource "aws_iam_role_policy" "ecs_task_s3" {
+  name = "juice-shop-ecs-task-s3"
+  role = aws_iam_role.ecs_task_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          aws_s3_bucket.donald_duck.arn,
+          "${aws_s3_bucket.donald_duck.arn}/*"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role" "ecs_execution_role" {
+  name = "juice-shop-ecs-execution-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_execution_role_policy" {
+  role       = aws_iam_role.ecs_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+
+resource "aws_ecs_task_definition" "juice_shop" {
+  family                   = "juice-shop"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = 256
+  memory                   = 512
+  task_role_arn           = aws_iam_role.ecs_task_role.arn
+  execution_role_arn      = aws_iam_role.ecs_execution_role.arn
+
+  container_definitions = jsonencode([
+    {
+      name  = "log_router"
+      image = "public.ecr.aws/aws-observability/aws-for-fluent-bit:latest"
+      firelensConfiguration = {
+        type = "fluentbit"
+        options = {
+          "enable-ecs-log-metadata" = "true"
+        }
+      }
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.firelens.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "firelens"
+        }
+      }
+      memoryReservation = 50
+    },
+    {
+      name  = "juice-shop"
+      image = "bkimminich/juice-shop:latest"
+      portMappings = [
+        {
+          containerPort = 3000
+          hostPort      = 3000
+          protocol      = "tcp"
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awsfirelens"
+        options = {
+          "Name"       = "s3"
+          "region"     = var.aws_region
+          "bucket"     = aws_s3_bucket.donald_duck.id
+          "prefix"     = "juice-shop-logs/"
+          "compress"   = "gzip"
+          "total_file_size" = "1M"
+          "upload_timeout" = "1m"
+        }
+      }
+      dependsOn = [
+        {
+          containerName = "log_router"
+          condition     = "START"
+        }
+      ]
+    }
+  ])
+}
+
+
+#output for juiceshop url
 output "juice_shop_url" {
   value = "http://${aws_lb.main.dns_name}"
 }
