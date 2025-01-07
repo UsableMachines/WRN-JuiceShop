@@ -19,46 +19,6 @@ terraform {
   }
 }
 
-data "aws_caller_identity" "current" {}
-
-resource "aws_s3_object" "fluent_bit_config" {
-  bucket  = aws_s3_bucket.donald_duck.id
-  key     = "parse-json.conf"
-  content = <<EOF
-[SERVICE]
-    Parsers_File /fluent-bit/parsers.conf
-    Log_Level    info
-
-[INPUT]
-    Name   forward
-    Listen 0.0.0.0
-    Port   24224
-
-[FILTER]
-    Name   parser
-    Match  *
-    Key_Name log
-    Parser  docker
-    Reserve_Data true
-
-[FILTER]
-    Name   modify
-    Match  *
-    Add    app_name juice-shop
-
-[OUTPUT]
-    Name               s3
-    Match              *
-    region             ${var.aws_region}
-    bucket             ${aws_s3_bucket.donald_duck.id}
-    total_file_size    1M
-    upload_timeout     1m
-    use_put_object     On
-    compression        gzip
-    s3_key_format      /juice-shop-logs/%Y/%m/%d/%H/%M/%S
-EOF
-}
-
 provider "aws" {
   region = var.aws_region
 }
@@ -190,61 +150,6 @@ resource "aws_lb_listener" "main" {
   }
 }
 
-#create publicly exposed s3 bucket
-
-resource "aws_s3_bucket" "donald_duck" {
-  bucket = "donald-duck"
-  force_destroy = true
-}
-
-resource "aws_s3_bucket_public_access_block" "donald_duck" {
-  bucket = aws_s3_bucket.donald_duck.id
-  
-  block_public_acls       = false
-  block_public_policy     = false
-  ignore_public_acls      = false
-  restrict_public_buckets = false
-}
-
-resource "aws_s3_bucket_policy" "allow_public_read" {
-  bucket = aws_s3_bucket.donald_duck.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "PublicReadOnly"
-        Effect    = "Allow"
-        Principal = "*"
-        Action    = [
-          "s3:GetObject",
-          "s3:ListBucket" 
-        ]
-        Resource = [
-          aws_s3_bucket.donald_duck.arn,
-          "${aws_s3_bucket.donald_duck.arn}/*"
-        ]
-      }
-    ]
-  })
-}
-
-resource "aws_s3_bucket_ownership_controls" "donald_duck" {
-  bucket = aws_s3_bucket.donald_duck.id
-  rule {
-    object_ownership = "BucketOwnerPreferred"
-  }
-}
-
-resource "aws_s3_bucket_acl" "donald_duck" {
-  depends_on = [
-    aws_s3_bucket_public_access_block.donald_duck,
-    aws_s3_bucket_ownership_controls.donald_duck,
-  ]
-
-  bucket = aws_s3_bucket.donald_duck.id
-  acl    = "public-read"
-}
-
 # ECS Resources
 resource "aws_ecs_cluster" "main" {
   name = "juice-shop-cluster"
@@ -255,26 +160,26 @@ resource "aws_ecs_cluster" "main" {
   }
 }
 
-resource "aws_cloudwatch_log_group" "firelens" {
-  name              = "/aws/ecs/juice-shop-firelens"
-  retention_in_days = 14
-}
+resource "aws_ecs_task_definition" "juice_shop" {
+  family                   = "juice-shop"
+  network_mode            = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                     = 256
+  memory                  = 512
 
-resource "aws_iam_role" "ecs_task_role" {
-  name = "juice-shop-ecs-task-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "ecs-tasks.amazonaws.com"
+  container_definitions = jsonencode([
+    {
+      name  = "juice-shop"
+      image = "bkimminich/juice-shop:latest"
+      portMappings = [
+        {
+          containerPort = 3000
+          hostPort      = 3000
+          protocol      = "tcp"
         }
-      }
-    ]
-  })
+      ]
+    }
+  ])
 }
 
 resource "aws_ecs_service" "juice_shop" {
@@ -301,185 +206,6 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
-#Firelens to ship logs to donald-duck s3 bucket
-resource "aws_iam_role_policy" "ecs_task_s3" {
-  name = "juice-shop-ecs-task-s3"
-  role = aws_iam_role.ecs_task_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:PutObject",
-          "s3:GetObject",
-          "s3:ListBucket"
-        ]
-        Resource = [
-          aws_s3_bucket.donald_duck.arn,
-          "${aws_s3_bucket.donald_duck.arn}/*"
-        ]
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy" "ecs_task_cloudwatch" {
-  name = "juice-shop-ecs-task-cloudwatch"
-  role = aws_iam_role.ecs_task_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogStream",
-          "logs:PutLogEvents",
-          "logs:DescribeLogStreams"
-        ]
-        Resource = "${aws_cloudwatch_log_group.firelens.arn}:*"
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role" "ecs_execution_role" {
-  name = "juice-shop-ecs-execution-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "ecs-tasks.amazonaws.com"
-        }
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "ecs_execution_role_policy" {
-  role       = aws_iam_role.ecs_execution_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-}
-
-
-resource "aws_ecs_task_definition" "juice_shop" {
-  family                   = "juice-shop"
-  network_mode             = "awsvpc"
-  requires_compatibilities = ["FARGATE"]
-  cpu                      = 256
-  memory                   = 512
-  task_role_arn           = aws_iam_role.ecs_task_role.arn
-  execution_role_arn      = aws_iam_role.ecs_execution_role.arn
-
-  container_definitions = jsonencode([
-    {
-      name  = "log_router"
-      image = "public.ecr.aws/aws-observability/aws-for-fluent-bit:latest"
-      essential = true
-      firelensConfiguration = {
-        type = "fluentbit"
-        options = {
-          "enable-ecs-log-metadata" = "true"
-          "config-file-type"        = "file"
-          "config-file-value"       = "/fluent-bit/etc/extra.conf"
-        }
-      }
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.firelens.name
-          "awslogs-region"        = var.aws_region
-          "awslogs-stream-prefix" = "firelens"
-        }
-      }
-      memoryReservation = 50
-      environment = [
-        {
-          name  = "FLB_CONFIG_EXTRA",
-          value = <<EOF
-[SERVICE]
-    Parsers_File /fluent-bit/parsers.conf
-    Log_Level    info
-
-[INPUT]
-    Name   forward
-    Listen 0.0.0.0
-    Port   24224
-
-[FILTER]
-    Name   parser
-    Match  *
-    Key_Name log
-    Parser  docker
-    Reserve_Data true
-
-[FILTER]
-    Name   modify
-    Match  *
-    Add    app_name juice-shop
-
-[OUTPUT]
-    Name               s3
-    Match              *
-    region             ${var.aws_region}
-    bucket             ${aws_s3_bucket.donald_duck.id}
-    total_file_size    1M
-    upload_timeout     1m
-    use_put_object     On
-    compression        gzip
-    s3_key_format      /juice-shop-logs/%Y/%m/%d/%H/%M/%S
-EOF
-        }
-      ]
-    },
-    {
-      name  = "juice-shop"
-      image = "bkimminich/juice-shop:latest"
-      portMappings = [
-        {
-          containerPort = 3000
-          hostPort      = 3000
-          protocol      = "tcp"
-        }
-      ]
-      logConfiguration = {
-        logDriver = "awsfirelens"
-        options = {
-          "Name"              = "s3"
-          "region"           = var.aws_region
-          "bucket"           = aws_s3_bucket.donald_duck.id
-          "total_file_size"  = "1M"
-          "upload_timeout"   = "1m"
-          "use_put_object"   = "On"
-          "compression"      = "gzip"
-          "s3_key_format"    = "/juice-shop-logs/%Y/%m/%d/%H/%M/%S"
-        }
-        secretOptions = []
-      }
-      environment = [
-        {
-          name  = "NODE_ENV"
-          value = "production"
-        }
-      ]
-      dependsOn = [
-        {
-          containerName = "log_router"
-          condition     = "START"
-        }
-      ]
-      essential = true
-    }
-  ])
-}
-
-#output for juiceshop url
 output "juice_shop_url" {
   value = "http://${aws_lb.main.dns_name}"
 }
