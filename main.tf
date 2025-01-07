@@ -206,6 +206,65 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+/*output "juice_shop_url" {
+  value = "http://${aws_lb.main.dns_name}"
+}*/
+
+#create publicly exposed s3 bucket
+
+resource "aws_s3_bucket" "donald_duck" {
+  bucket = "donald-duck"
+  force_destroy = true
+}
+
+resource "aws_s3_bucket_public_access_block" "donald_duck" {
+  bucket = aws_s3_bucket.donald_duck.id
+  
+  block_public_acls       = false
+  block_public_policy     = false
+  ignore_public_acls      = false
+  restrict_public_buckets = false
+}
+
+resource "aws_s3_bucket_policy" "allow_public_read" {
+  bucket = aws_s3_bucket.donald_duck.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "PublicReadOnly"
+        Effect    = "Allow"
+        Principal = "*"
+        Action    = [
+          "s3:GetObject",
+          "s3:ListBucket" 
+        ]
+        Resource = [
+          aws_s3_bucket.donald_duck.arn,
+          "${aws_s3_bucket.donald_duck.arn}/*"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_s3_bucket_ownership_controls" "donald_duck" {
+  bucket = aws_s3_bucket.donald_duck.id
+  rule {
+    object_ownership = "BucketOwnerPreferred"
+  }
+}
+
+resource "aws_s3_bucket_acl" "donald_duck" {
+  depends_on = [
+    aws_s3_bucket_public_access_block.donald_duck,
+    aws_s3_bucket_ownership_controls.donald_duck,
+  ]
+
+  bucket = aws_s3_bucket.donald_duck.id
+  acl    = "public-read"
+}
+
 output "juice_shop_url" {
   value = "http://${aws_lb.main.dns_name}"
 }

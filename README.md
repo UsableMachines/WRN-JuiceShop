@@ -18,7 +18,7 @@ You will be prompted for a the following:
 
 This README will be using OpenTofu commands, which is a fork of opensource Terraform. If you're using Terraform, simply interchange ```tofu``` commands with ```terraform``` .
 
-# Main.tf Set Up
+# Terrafrom/OpenTofu Set Up
 
 This will deploy an OWASP Juiceshop docker image from bkimminich/juice-shop to AWS ECS, sitting behind an application load balancer. The main.tf relies on a variables.tf and a terrafrom.tfvars files, plus a S3 bucket for remote state storage.
 
@@ -37,7 +37,7 @@ juice_shop_url = "http://juice-shop-alb-0000000000.us-east-1.elb.amazonaws.com"
 
 The Juiceshop will not be immediately available and may see a 503 error. Give it a few minutes for post processing and keep refreshing the URL.
 
-# (In)security Design
+## (In)security Design
 
 The infrastructure design has less than ideal security to provide additional attack surfaces for a pen test environment. Here are known vulnerabilities of this deployment from a Trivy scan: 
 
@@ -173,6 +173,19 @@ See https://avd.aquasec.com/misconfig/aws-autoscaling-enable-at-rest-encryption
 ─────────────────────────────────────────────────────────────────────────────────
 ```
 
-# Cleaning Up
+## Cleaning Up
 
 Deleting the environment is one command: ```tofu destroy```. It will delete all deployed resources from main.tf. You will be prompted to answer yes or no to the deletion.
+
+# Let's Attack It!
+
+Asking White Rabbit Neo suggestions on how to pen test this site will give you a few starting points. Using Kindo and enabling Advanced Chat Tools to crawl the deployed Juiceshop URL will result in WRN recogning that it's OWASP's Juiceshop and recommends common vulnerability patterns for it. It tends to skip the 101s, so let's start there.
+
+## NMAP
+
+With OWASP Juiceshop deployed, it's time to see what vulnerabilities can be discovered. If you're new to this, and unfamiliar with IaC, it's a little daunting to figure out where to start. The simple first step is either running a nmap scan against the URL or the ALB IP. What you'll discover is no surprise based on http vs https, is that port 80 is open. The app sits behind an ALB which will affect nmap's ability to scan it. The decision to deploy behind an ALB is to replicate how something like this would actually be deployed.  Here is a good starter reference for namp commands and switches: https://www.recordedfuture.com/threat-intelligence-101/tools-and-techniques/nmap-commands.
+
+## OpenVAS
+
+Now that we know that port 80 is open, it's time to scan for vulnerabilities. 
+
