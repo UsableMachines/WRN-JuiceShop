@@ -36,7 +36,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "donald_duck" {
     status = "Enabled"
 
     expiration {
-      days = 7
+      days = 3
     }
   }
 }
