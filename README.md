@@ -177,6 +177,10 @@ See https://avd.aquasec.com/misconfig/aws-autoscaling-enable-at-rest-encryption
 
 Deleting the environment is one command: ```tofu destroy```. It will delete all deployed resources from main.tf. You will be prompted to answer yes or no to the deletion.
 
+## Logging
+
+Logs from the juice shop container is sent to an S3 bucket called donald-duck that is wide open to the world. The bucket has a lifecycle setting to delete logs older than 3 days. Getting logs to the S3 bucket is a little convoluted, AWS FireLens is the default for ECS container log management, but it's necessary to route the logs via FluentBit to ship to S3.
+
 # Let's Attack It!
 
 Asking White Rabbit Neo suggestions on how to pen test this site will give you a few starting points. Using Kindo and enabling Advanced Chat Tools to crawl the deployed Juiceshop URL will result in WRN recogning that it's OWASP's Juiceshop and recommends common vulnerability patterns for it. It tends to skip the 101s, so let's start there.
