@@ -258,7 +258,8 @@ resource "aws_ecs_task_definition" "juice_shop" {
   memory                  = 512
   task_role_arn           = aws_iam_role.ecs_task_role.arn #for ECS IAM role line 211
   execution_role_arn      = aws_iam_role.ecs_task_role.arn #for ECS IAM role line 211
-
+  
+  #log router with fluentbit to ship logs to s3
   container_definitions = jsonencode([
     {
       name  = "log_router"
@@ -291,6 +292,7 @@ resource "aws_ecs_task_definition" "juice_shop" {
           protocol      = "tcp"
         }
       ]
+      #logging defination for juiceshop 
       logConfiguration = {
         logDriver = "awsfirelens"
         options = {
