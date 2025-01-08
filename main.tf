@@ -28,6 +28,19 @@ resource "aws_s3_bucket" "donald_duck" {
   bucket = "donald-duck"
 }
 
+resource "aws_s3_bucket_lifecycle_configuration" "donald_duck" {
+  bucket = aws_s3_bucket.donald_duck.id
+
+  rule {
+    id     = "delete_old_logs"
+    status = "Enabled"
+
+    expiration {
+      days = 7
+    }
+  }
+}
+
 resource "aws_s3_bucket_public_access_block" "donald_duck" {
   bucket = aws_s3_bucket.donald_duck.id
 
