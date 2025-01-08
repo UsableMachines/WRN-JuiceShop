@@ -256,10 +256,31 @@ resource "aws_ecs_task_definition" "juice_shop" {
   requires_compatibilities = ["FARGATE"]
   cpu                     = 256
   memory                  = 512
-  task_role_arn           = aws_iam_role.ecs_task_role.arn #for ECS IAM role
-  execution_role_arn      = aws_iam_role.ecs_task_role.arn #for ECS IAM role
+  task_role_arn           = aws_iam_role.ecs_task_role.arn #for ECS IAM role line 211
+  execution_role_arn      = aws_iam_role.ecs_task_role.arn #for ECS IAM role line 211
 
   container_definitions = jsonencode([
+    {
+      name  = "log_router"
+      image = "public.ecr.aws/aws-observability/aws-for-fluent-bit:latest"
+      firelensConfiguration = {
+        type = "fluentbit"
+        options = {
+          "enable-ecs-log-metadata" = "true"
+        }
+      }
+      logConfiguration = {
+        logDriver = "awsfirelens"
+        options = {
+          Name = "s3"
+          region = var.aws_region
+          bucket = "donald-duck"
+          total_file_size = "1M"
+          upload_timeout = "1m"
+        }
+      }
+      memoryReservation = 50
+    },
     {
       name  = "juice-shop"
       image = "bkimminich/juice-shop:latest"
@@ -270,10 +291,25 @@ resource "aws_ecs_task_definition" "juice_shop" {
           protocol      = "tcp"
         }
       ]
+      logConfiguration = {
+        logDriver = "awsfirelens"
+        options = {
+          Name = "s3"
+          region = var.aws_region
+          bucket = "donald-duck"
+          total_file_size = "1M"
+          upload_timeout = "1m"
+        }
+      }
+      dependsOn = [
+        {
+          containerName = "log_router"
+          condition = "START"
+        }
+      ]
     }
   ])
 }
-
 resource "aws_ecs_service" "juice_shop" {
   name            = "juice-shop-service"
   cluster         = aws_ecs_cluster.main.id
