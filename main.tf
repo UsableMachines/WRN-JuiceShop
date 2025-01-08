@@ -23,6 +23,54 @@ provider "aws" {
   region = var.aws_region
 }
 
+# loosey-goosey S3 Bucket
+resource "aws_s3_bucket" "donald_duck" {
+  bucket = "donald-duck"
+}
+
+resource "aws_s3_bucket_public_access_block" "donald_duck" {
+  bucket = aws_s3_bucket.donald_duck.id
+
+  block_public_acls       = false
+  block_public_policy     = false
+  ignore_public_acls      = false
+  restrict_public_buckets = false
+}
+
+resource "aws_s3_bucket_ownership_controls" "donald_duck" {
+  bucket = aws_s3_bucket.donald_duck.id
+  rule {
+    object_ownership = "BucketOwnerPreferred"
+  }
+}
+
+resource "aws_s3_bucket_acl" "donald_duck" {
+  depends_on = [
+    aws_s3_bucket_public_access_block.donald_duck,
+    aws_s3_bucket_ownership_controls.donald_duck,
+  ]
+
+  bucket = aws_s3_bucket.donald_duck.id
+  acl    = "public-read"
+}
+
+resource "aws_s3_bucket_policy" "donald_duck" {
+  bucket = aws_s3_bucket.donald_duck.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "PublicReadGetObject"
+        Effect    = "Allow"
+        Principal = "*"
+        Action    = "s3:GetObject"
+        Resource  = "${aws_s3_bucket.donald_duck.arn}/*"
+      },
+    ]
+  })
+}
+
 # VPC and Networking
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
@@ -160,12 +208,56 @@ resource "aws_ecs_cluster" "main" {
   }
 }
 
+#IAM role for ECS task and log shipping
+
+resource "aws_iam_role" "ecs_task_role" {
+  name = "ecs-task-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "ecs_s3_access" {
+  name = "ecs-s3-access"
+  role = aws_iam_role.ecs_task_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject", 
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "arn:aws:s3:::donald-duck",
+          "arn:aws:s3:::donald-duck/*"
+        ]
+      }
+    ]
+  })
+}
+
 resource "aws_ecs_task_definition" "juice_shop" {
   family                   = "juice-shop"
   network_mode            = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   cpu                     = 256
   memory                  = 512
+  task_role_arn           = aws_iam_role.ecs_task_role.arn #for ECS IAM role
+  execution_role_arn      = aws_iam_role.ecs_task_role.arn #for ECS IAM role
 
   container_definitions = jsonencode([
     {
