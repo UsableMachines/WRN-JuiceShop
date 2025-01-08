@@ -185,7 +185,7 @@ Asking White Rabbit Neo suggestions on how to pen test this site will give you a
 
 With OWASP Juiceshop deployed, it's time to see what vulnerabilities can be discovered. If you're new to this, and unfamiliar with IaC, it's a little daunting to figure out where to start. The simple first step is either running a nmap scan against the URL or the ALB IP. What you'll discover is no surprise based on http vs https, is that port 80 is open. The app sits behind an ALB which will affect nmap's ability to scan it. The decision to deploy behind an ALB is to replicate how something like this would actually be deployed.  Here is a good starter reference for namp commands and switches: https://www.recordedfuture.com/threat-intelligence-101/tools-and-techniques/nmap-commands.
 
-## OpenVAS
+## Vulnerability Scanners.
 
-Now that we know that port 80 is open, it's time to scan for vulnerabilities. 
+Now that we know that port 80 is open, it's time to scan for vulnerabilities. You can use opensource tools like OpenVAS and ZAP (Zed Attack Proxy). These tools help fund vulnerabilities that can be exploited. ZAP produces a handy report and in it are details about the discovered vulnerabilities. Copy one of them and ask WRN how to exploit the vulnerability. If you are looking at this repo and using WRN as part of an IDE, you can include the files in the repo for additional context.
 
