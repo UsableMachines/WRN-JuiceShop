@@ -26,6 +26,7 @@ provider "aws" {
 # loosey-goosey S3 Bucket
 resource "aws_s3_bucket" "donald_duck" {
   bucket = "donald-duck"
+  force_destroy = true
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "donald_duck" {
@@ -263,14 +264,16 @@ resource "aws_iam_role_policy" "ecs_s3_access" {
   })
 }
 
+#increasing cpu and mem reserve when adding nginx, was running fine at 256/512 with just juiceshop and logging
+#task role is specific to ECS IAM role (resource "aws_iam_role" "ecs_task_role")
 resource "aws_ecs_task_definition" "juice_shop" {
   family                   = "juice-shop"
   network_mode            = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   cpu                     = 256
   memory                  = 512
-  task_role_arn           = aws_iam_role.ecs_task_role.arn #for ECS IAM role line 211
-  execution_role_arn      = aws_iam_role.ecs_task_role.arn #for ECS IAM role line 211
+  task_role_arn           = aws_iam_role.ecs_task_role.arn 
+  execution_role_arn      = aws_iam_role.ecs_task_role.arn 
   
   #log router with fluentbit to ship logs to s3
   container_definitions = jsonencode([
